@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Login / Sign Up</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    /* Your CSS remains the same */
+    /* (No changes needed in styles) */
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f1f3f8;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .auth-container {
+      background: #fff;
+      padding: 40px;
+      width: 100%;
+      max-width: 400px;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    }
+    h2 { text-align: center; margin-bottom: 20px; color: #333; }
+    input[type="email"], input[type="password"] {
+      width: 100%;
+      padding: 12px;
+      margin: 10px 0;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      margin-top: 10px;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    #signup-btn { background-color: #4CAF50; color: white; }
+    #login-btn { background-color: #2196F3; color: white; }
+    #google-btn { background-color: #DB4437; color: white; }
+    #logout-btn { background-color: #f44336; color: white; margin-top: 20px; }
+    .switch { text-align: center; margin-top: 15px; font-size: 14px; }
+    #user-info { margin-top: 20px; text-align: center; color: #333; }
+  </style>
+</head>
+<body>
+
+<div class="auth-container">
+  <h2 id="form-title">Login</h2>
+  <input type="email" id="email" placeholder="Email" required />
+  <input type="password" id="password" placeholder="Password" required />
+  
+  <button id="login-btn">Login</button>
+  <button id="signup-btn" style="display:none;">Sign Up</button>
+  <button id="google-btn">Sign in with Google</button>
+  
+  <div class="switch">
+    <span id="toggle-text">Don't have an account?</span>
+    <a href="#" id="toggle-link">Sign Up</a>
+  </div>
+
+  <button id="logout-btn" style="display:none;">Logout</button>
+  <div id="user-info"></div>
+</div>
+
+<!-- Firebase Core SDKs -->
+<script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore-compat.js"></script>
+
+<script>
+  // Firebase configuration
+  const firebaseConfig = {
+    apiKey: "AIzaSyAxL-f1ThdimBKBWEn_83zIwr1wn-EZ3Tk",
+    authDomain: "reser-323b6.firebaseapp.com",
+    projectId: "reser-323b6",
+    storageBucket: "reser-323b6.appspot.com",
+    messagingSenderId: "587671271436",
+    appId: "1:587671271436:web:38e6f1928eebc799925629",
+    measurementId: "G-Z7PHT283WZ"
+  };
+
+  // Initialize Firebase
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  // Elements
+  const emailInput = document.getElementById('email');
+  const passwordInput = document.getElementById('password');
+  const loginBtn = document.getElementById('login-btn');
+  const signupBtn = document.getElementById('signup-btn');
+  const googleBtn = document.getElementById('google-btn');
+  const logoutBtn = document.getElementById('logout-btn');
+  const userInfo = document.getElementById('user-info');
+  const toggleLink = document.getElementById('toggle-link');
+  const formTitle = document.getElementById('form-title');
+  const toggleText = document.getElementById('toggle-text');
+
+  let isLogin = true;
+
+  // Toggle between login and signup
+  toggleLink.addEventListener('click', () => {
+    isLogin = !isLogin;
+    if (isLogin) {
+      formTitle.textContent = 'Login';
+      loginBtn.style.display = 'block';
+      signupBtn.style.display = 'none';
+      toggleText.textContent = "Don't have an account?";
+      toggleLink.textContent = "Sign Up";
+    } else {
+      formTitle.textContent = 'Sign Up';
+      loginBtn.style.display = 'none';
+      signupBtn.style.display = 'block';
+      toggleText.textContent = "Already have an account?";
+      toggleLink.textContent = "Login";
+    }
+  });
+
+  // Email Login
+  loginBtn.addEventListener('click', () => {
+    const email = emailInput.value;
+    const password = passwordInput.value;
+    auth.signInWithEmailAndPassword(email, password)
+      .then(result => {
+        const user = result.user;
+        userInfo.textContent = `Logged in as ${user.email}`;
+        logoutBtn.style.display = 'block';
+        window.location.href = "expense_tracker.html"; // Redirect
+      })
+      .catch(error => {
+        alert(error.message);
+      });
+  });
+
+  // Email Signup
+  signupBtn.addEventListener('click', () => {
+    const email = emailInput.value;
+    const password = passwordInput.value;
+    auth.createUserWithEmailAndPassword(email, password)
+      .then(result => {
+        const user = result.user;
+
+        // Save user in Firestore
+        db.collection("users").doc(user.uid).set({
+          email: user.email,
+          expenses: [],
+          incomes: [],
+          savings: []
+        });
+
+        userInfo.textContent = `Account created: ${user.email}`;
+        logoutBtn.style.display = 'block';
+        window.location.href = "expense_tracker.html"; // Redirect
+      })
+      .catch(error => {
+        alert(error.message);
+      });
+  });
+
+  // Google Sign In
+  googleBtn.addEventListener('click', () => {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    auth.signInWithPopup(provider)
+      .then(result => {
+        const user = result.user;
+
+        // Save user in Firestore if new
+        db.collection("users").doc(user.uid).get().then(docSnapshot => {
+          if (!docSnapshot.exists) {
+            db.collection("users").doc(user.uid).set({
+              email: user.email,
+              expenses: [],
+              incomes: [],
+              savings: []
+            });
+          }
+        });
+
+        userInfo.textContent = `Logged in as ${user.displayName}`;
+        logoutBtn.style.display = 'block';
+        window.location.href = "expense_tracker.html"; // Redirect
+      })
+      .catch(error => {
+        alert(error.message);
+      });
+  });
+
+  // Logout
+  logoutBtn.addEventListener('click', () => {
+    auth.signOut().then(() => {
+      userInfo.textContent = '';
+      logoutBtn.style.display = 'none';
+      emailInput.value = '';
+      passwordInput.value = '';
+    });
+  });
+
+  // Auto-login check
+  auth.onAuthStateChanged(user => {
+    if (user) {
+      userInfo.textContent = `Welcome back, ${user.displayName || user.email}`;
+      logoutBtn.style.display = 'block';
+    }
+  });
+</script>
+
+</body>
+</html>
