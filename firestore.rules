@@ -1,8 +1,60 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{userId}/{documents=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return request.auth.uid == uid;
+    }
+
+    function validTransactionData(data) {
+      return data.keys().hasAll(['category', 'amount', 'purpose', 'date', 'createdAt'])
+        && data.amount is number
+        && data.amount > 0
+        && data.amount <= 9999999
+        && data.purpose is string
+        && data.purpose.size() > 0
+        && data.purpose.size() <= 200
+        && data.category is string
+        && data.category.size() > 0
+        && data.category.size() <= 50
+        && data.date is string;
+    }
+
+    match /users/{uid} {
+      allow read:   if isSignedIn() && isOwner(uid);
+      allow create: if isSignedIn() && isOwner(uid)
+                       && request.resource.data.keys().hasAll(['email','createdAt']);
+      allow update: if isSignedIn() && isOwner(uid);
+      allow delete: if false;
+
+      match /expenses/{expenseId} {
+        allow read:   if isSignedIn() && isOwner(uid);
+        allow create: if isSignedIn() && isOwner(uid) && validTransactionData(request.resource.data);
+        allow update: if isSignedIn() && isOwner(uid) && validTransactionData(request.resource.data);
+        allow delete: if isSignedIn() && isOwner(uid);
+      }
+
+      match /incomes/{incomeId} {
+        allow read:   if isSignedIn() && isOwner(uid);
+        allow create: if isSignedIn() && isOwner(uid) && validTransactionData(request.resource.data);
+        allow update: if isSignedIn() && isOwner(uid) && validTransactionData(request.resource.data);
+        allow delete: if isSignedIn() && isOwner(uid);
+      }
+
+      match /savings/{savingId} {
+        allow read:   if isSignedIn() && isOwner(uid);
+        allow create: if isSignedIn() && isOwner(uid) && validTransactionData(request.resource.data);
+        allow update: if isSignedIn() && isOwner(uid) && validTransactionData(request.resource.data);
+        allow delete: if isSignedIn() && isOwner(uid);
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
