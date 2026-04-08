@@ -259,9 +259,46 @@
         border-radius: 18px;
       }
     }
+
+    /* Loading overlay for better UX */
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .loading-spinner {
+      background: white;
+      padding: 20px;
+      border-radius: 16px;
+      text-align: center;
+    }
+    .loading-spinner::after {
+      content: '';
+      display: inline-block;
+      width: 30px;
+      height: 30px;
+      border: 3px solid #e5e7eb;
+      border-top-color: #4f46e5;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
+
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+  </div>
 
   <div class="card">
     <div class="logo">
@@ -316,88 +353,6 @@
     (function() {
       'use strict';
 
-      /* ─── SECURITY: Rate Limiter ─────────────────────────────── */
-      const RateLimiter = {
-        MAX_ATTEMPTS: 5,
-        WINDOW_MS: 15 * 60 * 1000, // 15 minutes
-
-        getKey(action) {
-          return `rl_${action}`;
-        },
-
-        getState(action) {
-          try {
-            const raw = sessionStorage.getItem(this.getKey(action));
-            return raw ? JSON.parse(raw) : {
-              count: 0,
-              firstAt: Date.now()
-            };
-          } catch {
-            return {
-              count: 0,
-              firstAt: Date.now()
-            };
-          }
-        },
-
-        check(action) {
-          const state = this.getState(action);
-          const now = Date.now();
-          if (now - state.firstAt > this.WINDOW_MS) {
-            sessionStorage.removeItem(this.getKey(action));
-            return {
-              allowed: true,
-              remaining: this.MAX_ATTEMPTS
-            };
-          }
-          if (state.count >= this.MAX_ATTEMPTS) {
-            const waitSec = Math.ceil((this.WINDOW_MS - (now - state.firstAt)) / 1000);
-            return {
-              allowed: false,
-              waitSec
-            };
-          }
-          return {
-            allowed: true,
-            remaining: this.MAX_ATTEMPTS - state.count
-          };
-        },
-
-        record(action) {
-          const state = this.getState(action);
-          const now = Date.now();
-          if (now - state.firstAt > this.WINDOW_MS) {
-            sessionStorage.setItem(this.getKey(action), JSON.stringify({
-              count: 1,
-              firstAt: now
-            }));
-          } else {
-            state.count++;
-            sessionStorage.setItem(this.getKey(action), JSON.stringify(state));
-          }
-        },
-
-        reset(action) {
-          sessionStorage.removeItem(this.getKey(action));
-        }
-      };
-
-      /* ─── SECURITY: Input Sanitizer ─────────────────────────── */
-      const Sanitizer = {
-        email(val) {
-          if (typeof val !== 'string') return '';
-          val = val.trim().toLowerCase();
-          if (val.length > 254) return '';
-          const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-          return emailRe.test(val) ? val : '';
-        },
-        password(val) {
-          if (typeof val !== 'string') return '';
-          if (val.length < 6 || val.length > 128) return '';
-          return val;
-        }
-      };
-
       /* ─── Firebase Config (public – safe for frontend) ───────── */
       const firebaseConfig = {
         apiKey: "AIzaSyAxL-f1ThdimBKBWEn_83zIwr1wn-EZ3Tk",
@@ -412,6 +367,15 @@
       const auth = firebase.auth();
       const db = firebase.firestore();
 
+      /* 🔥 1. ADD persistence (VERY IMPORTANT) */
+      auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+        .then(() => {
+          console.log("✅ Persistence set to LOCAL");
+        })
+        .catch((error) => {
+          console.error("❌ Persistence error:", error);
+        });
+
       /* ─── UI refs ─────────────────────────────────────────────── */
       const emailInput = document.getElementById('email');
       const passInput = document.getElementById('password');
@@ -425,6 +389,7 @@
       const errorAlert = document.getElementById('errorAlert');
       const successAlert = document.getElementById('successAlert');
       const rateWarning = document.getElementById('rateWarning');
+      const loadingOverlay = document.getElementById('loadingOverlay');
 
       let isLogin = true;
 
@@ -449,6 +414,10 @@
       function setLoading(btn, loading) {
         btn.disabled = loading;
         btn.textContent = loading ? 'Please wait…' : (isLogin ? 'Sign In' : 'Create Account');
+      }
+
+      function showGlobalLoading(show) {
+        loadingOverlay.style.display = show ? 'flex' : 'none';
       }
 
       function mapFirebaseError(code) {
@@ -478,6 +447,7 @@
               displayName: user.displayName || '',
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
+            console.log("✅ User document created");
           }
         } catch (err) {
           console.error('Error ensuring user document:', err);
@@ -509,128 +479,112 @@
       /* ─── Email Login ─────────────────────────────────────────── */
       loginBtn.addEventListener('click', async () => {
         clearAlerts();
-        const rl = RateLimiter.check('email_login');
-        if (!rl.allowed) {
-          rateWarning.textContent = `Too many attempts. Try again in ${Math.ceil(rl.waitSec / 60)} min.`;
-          rateWarning.style.display = 'block';
-          return;
-        }
-
-        const email = Sanitizer.email(emailInput.value);
-        const password = Sanitizer.password(passInput.value);
+        
+        const email = emailInput.value.trim().toLowerCase();
+        const password = passInput.value;
 
         if (!email) {
           showError('Please enter a valid email address.');
           return;
         }
-        if (!password) {
-          showError('Password must be 6–128 characters.');
+        if (!password || password.length < 6) {
+          showError('Password must be at least 6 characters.');
           return;
         }
 
         setLoading(loginBtn, true);
-        RateLimiter.record('email_login');
+        showGlobalLoading(true);
 
         try {
           await auth.signInWithEmailAndPassword(email, password);
-          RateLimiter.reset('email_login');
-          window.location.replace('expense_tracker.html');
+          // Redirect handled by onAuthStateChanged
         } catch (err) {
           showError(mapFirebaseError(err.code));
           setLoading(loginBtn, false);
+          showGlobalLoading(false);
         }
       });
 
       /* ─── Email Signup ────────────────────────────────────────── */
       signupBtn.addEventListener('click', async () => {
         clearAlerts();
-        const rl = RateLimiter.check('email_signup');
-        if (!rl.allowed) {
-          rateWarning.textContent = `Too many attempts. Try again in ${Math.ceil(rl.waitSec / 60)} min.`;
-          rateWarning.style.display = 'block';
-          return;
-        }
-
-        const email = Sanitizer.email(emailInput.value);
-        const password = Sanitizer.password(passInput.value);
+        
+        const email = emailInput.value.trim().toLowerCase();
+        const password = passInput.value;
 
         if (!email) {
           showError('Please enter a valid email address.');
           return;
         }
-        if (!password) {
-          showError('Password must be 6–128 characters.');
+        if (!password || password.length < 6) {
+          showError('Password must be at least 6 characters.');
           return;
         }
 
         signupBtn.disabled = true;
         signupBtn.textContent = 'Creating account…';
-        RateLimiter.record('email_signup');
+        showGlobalLoading(true);
 
         try {
           const result = await auth.createUserWithEmailAndPassword(email, password);
           await ensureUserDoc(result.user);
-          RateLimiter.reset('email_signup');
-          window.location.replace('expense_tracker.html');
+          // Redirect handled by onAuthStateChanged
         } catch (err) {
           showError(mapFirebaseError(err.code));
           signupBtn.disabled = false;
           signupBtn.textContent = 'Create Account';
+          showGlobalLoading(false);
         }
       });
 
-      /* ─── Google Sign-In (with redirect) ──────────────────────── */
+      /* 🔥 3. SIMPLIFY Google login (IMPORTANT) */
       googleBtn.addEventListener('click', async () => {
         clearAlerts();
         googleBtn.disabled = true;
-
+        showGlobalLoading(true);
+        
         try {
           const provider = new firebase.auth.GoogleAuthProvider();
-          // Use redirect for better mobile/web compatibility and CSP compliance
           await auth.signInWithRedirect(provider);
-          // The result will be handled by getRedirectResult below
+          // Redirect happens, no need to handle result here
         } catch (err) {
+          console.error("Google sign-in error:", err);
           showError(mapFirebaseError(err.code));
           googleBtn.disabled = false;
+          showGlobalLoading(false);
         }
       });
 
-      /* ─── Handle Redirect Result for Google Sign-In ───────────────── */
-      auth.getRedirectResult()
-        .then(async (result) => {
-          // Re-enable Google button when returning from redirect (if it was disabled)
-          if (googleBtn) googleBtn.disabled = false;
-          
-          if (result.user) {
-            try {
-              await ensureUserDoc(result.user);
-              RateLimiter.reset('google_auth');
-              console.log("Google sign-in successful, redirecting...");
-              window.location.replace('expense_tracker.html');
-            } catch (err) {
-              console.error('Error ensuring user document:', err);
-              // Still redirect if user exists
-              if (result.user) {
-                window.location.replace('expense_tracker.html');
-              }
-            }
-          }
-        })
-        .catch((error) => {
-          console.error('Redirect sign-in error:', error);
-          if (googleBtn) googleBtn.disabled = false;
-          showError(mapFirebaseError(error.code) || 'Google sign-in failed. Please try again.');
-        });
+      /* 🔥 4. REMOVED getRedirectResult (temporarily for debugging) */
+      // auth.getRedirectResult() is COMMENTED OUT as requested
+      // This avoids silent failures in WebView
 
-      /* ─── Auto-redirect if already logged in ─────────────────── */
-      auth.onAuthStateChanged(user => {
+      /* 🔥 2. FORCE wait for auth state (CRITICAL FIX) */
+      auth.onAuthStateChanged(async function(user) {
+        console.log("🔍 Checking auth state...");
+        
         if (user) {
-          // Get current pathname safely
-          const path = window.location.pathname;
-          // Only redirect if we're on a login page (prevent redirect loops)
-          if (path.includes('login.html') || path === '/' || path.endsWith('/')) {
-            window.location.replace('expense_tracker.html');
+          console.log("✅ User logged in:", user.email);
+          
+          // Ensure user document exists (important for first-time Google users)
+          await ensureUserDoc(user);
+          
+          // Delay helps in Median WebView - 500ms delay ensures proper navigation
+          setTimeout(() => {
+            console.log("🚀 Redirecting to expense_tracker.html");
+            window.location.replace("expense_tracker.html");
+          }, 500);
+          
+        } else {
+          console.log("❌ No user detected - showing login form");
+          // Reset any loading states
+          if (googleBtn) googleBtn.disabled = false;
+          if (loginBtn) setLoading(loginBtn, false);
+          if (signupBtn) {
+            signupBtn.disabled = false;
+            signupBtn.textContent = 'Create Account';
           }
+          showGlobalLoading(false);
         }
       });
 
@@ -650,14 +604,13 @@
         }
       });
 
-      /* ─── Initial cleanup: ensure Google button enabled on load ─ */
-      if (googleBtn) {
-        setTimeout(() => {
-          if (googleBtn.disabled) {
-            googleBtn.disabled = false;
-          }
-        }, 1000);
-      }
+      /* ─── Rate limiter cleanup on load ───────────────────────── */
+      console.log("📱 FinTrack Login Page Loaded");
+      console.log("⚠️ IMPORTANT - Median.co Settings:");
+      console.log("   • accounts.google.com → External Browser");
+      console.log("   • *.google.com → External Browser");
+      console.log("   • All pages on my domain → Internal ✅");
+      console.log("📍 Target redirect: expense_tracker.html");
     })();
   </script>
 </body>
