@@ -24,7 +24,6 @@
       --primary-dark: #3730a3;
       --danger: #ef4444;
       --success: #10b981;
-      --google: #db4437;
       --radius: 14px;
       --shadow: 0 20px 60px rgba(0, 0, 0, 0.10);
     }
@@ -260,25 +259,26 @@
       }
     }
 
-    /* Loading overlay for better UX */
     .loading-overlay {
       position: fixed;
       top: 0;
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(0,0,0,0.5);
+      background: rgba(0, 0, 0, 0.5);
       display: none;
       align-items: center;
       justify-content: center;
       z-index: 1000;
     }
+
     .loading-spinner {
       background: white;
       padding: 20px;
       border-radius: 16px;
       text-align: center;
     }
+
     .loading-spinner::after {
       content: '';
       display: inline-block;
@@ -289,8 +289,11 @@
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
+
     @keyframes spin {
-      to { transform: rotate(360deg); }
+      to {
+        transform: rotate(360deg);
+      }
     }
   </style>
 </head>
@@ -353,6 +356,16 @@
     (function() {
       'use strict';
 
+      /* 🔥 STEP 3: FORCE redirect using localStorage (KEY FIX) */
+      // This runs IMMEDIATELY at page load - before anything else
+      if (localStorage.getItem("google_logged_in") === "true") {
+        console.log("🚀 FORCE redirect from localStorage - Google login detected");
+        // Clear the flag immediately to prevent loops
+        localStorage.removeItem("google_logged_in");
+        window.location.replace("expense_tracker.html");
+        return; // Stop further execution
+      }
+
       /* ─── Firebase Config (public – safe for frontend) ───────── */
       const firebaseConfig = {
         apiKey: "AIzaSyAxL-f1ThdimBKBWEn_83zIwr1wn-EZ3Tk",
@@ -367,10 +380,10 @@
       const auth = firebase.auth();
       const db = firebase.firestore();
 
-      /* 🔥 1. ADD persistence (VERY IMPORTANT) */
+      /* 🔥 STEP 1: Force session persistence */
       auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
         .then(() => {
-          console.log("✅ Persistence set to LOCAL");
+          console.log("✅ Firebase persistence set to LOCAL");
         })
         .catch((error) => {
           console.error("❌ Persistence error:", error);
@@ -412,8 +425,13 @@
       }
 
       function setLoading(btn, loading) {
+        if (!btn) return;
         btn.disabled = loading;
-        btn.textContent = loading ? 'Please wait…' : (isLogin ? 'Sign In' : 'Create Account');
+        if (btn.id === 'login-btn') {
+          btn.textContent = loading ? 'Please wait…' : 'Sign In';
+        } else if (btn.id === 'signup-btn') {
+          btn.textContent = loading ? 'Creating account…' : 'Create Account';
+        }
       }
 
       function showGlobalLoading(show) {
@@ -447,7 +465,7 @@
               displayName: user.displayName || '',
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
-            console.log("✅ User document created");
+            console.log("✅ User document created for:", user.email);
           }
         } catch (err) {
           console.error('Error ensuring user document:', err);
@@ -455,135 +473,168 @@
       }
 
       /* ─── Toggle login/signup ─────────────────────────────────── */
-      toggleLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        clearAlerts();
-        isLogin = !isLogin;
-        if (isLogin) {
-          formTitle.textContent = 'Welcome back';
-          formSubtitle.textContent = 'Sign in to manage your finances';
-          loginBtn.style.display = 'block';
-          signupBtn.style.display = 'none';
-          toggleText.textContent = "Don't have an account?";
-          toggleLink.textContent = ' Sign up';
-        } else {
-          formTitle.textContent = 'Create account';
-          formSubtitle.textContent = 'Start tracking your finances today';
-          loginBtn.style.display = 'none';
-          signupBtn.style.display = 'block';
-          toggleText.textContent = 'Already have an account?';
-          toggleLink.textContent = ' Sign in';
-        }
-      });
+      if (toggleLink) {
+        toggleLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          clearAlerts();
+          isLogin = !isLogin;
+          if (isLogin) {
+            formTitle.textContent = 'Welcome back';
+            formSubtitle.textContent = 'Sign in to manage your finances';
+            loginBtn.style.display = 'block';
+            signupBtn.style.display = 'none';
+            toggleText.textContent = "Don't have an account?";
+            toggleLink.textContent = ' Sign up';
+          } else {
+            formTitle.textContent = 'Create account';
+            formSubtitle.textContent = 'Start tracking your finances today';
+            loginBtn.style.display = 'none';
+            signupBtn.style.display = 'block';
+            toggleText.textContent = 'Already have an account?';
+            toggleLink.textContent = ' Sign in';
+          }
+        });
+      }
 
       /* ─── Email Login ─────────────────────────────────────────── */
-      loginBtn.addEventListener('click', async () => {
-        clearAlerts();
-        
-        const email = emailInput.value.trim().toLowerCase();
-        const password = passInput.value;
+      if (loginBtn) {
+        loginBtn.addEventListener('click', async () => {
+          clearAlerts();
+          
+          const email = emailInput.value.trim().toLowerCase();
+          const password = passInput.value;
 
-        if (!email) {
-          showError('Please enter a valid email address.');
-          return;
-        }
-        if (!password || password.length < 6) {
-          showError('Password must be at least 6 characters.');
-          return;
-        }
+          if (!email) {
+            showError('Please enter a valid email address.');
+            return;
+          }
+          if (!password || password.length < 6) {
+            showError('Password must be at least 6 characters.');
+            return;
+          }
 
-        setLoading(loginBtn, true);
-        showGlobalLoading(true);
+          setLoading(loginBtn, true);
+          showGlobalLoading(true);
 
-        try {
-          await auth.signInWithEmailAndPassword(email, password);
-          // Redirect handled by onAuthStateChanged
-        } catch (err) {
-          showError(mapFirebaseError(err.code));
-          setLoading(loginBtn, false);
-          showGlobalLoading(false);
-        }
-      });
+          try {
+            await auth.signInWithEmailAndPassword(email, password);
+            // Redirect handled by onAuthStateChanged
+          } catch (err) {
+            showError(mapFirebaseError(err.code));
+            setLoading(loginBtn, false);
+            showGlobalLoading(false);
+          }
+        });
+      }
 
       /* ─── Email Signup ────────────────────────────────────────── */
-      signupBtn.addEventListener('click', async () => {
-        clearAlerts();
-        
-        const email = emailInput.value.trim().toLowerCase();
-        const password = passInput.value;
+      if (signupBtn) {
+        signupBtn.addEventListener('click', async () => {
+          clearAlerts();
+          
+          const email = emailInput.value.trim().toLowerCase();
+          const password = passInput.value;
 
-        if (!email) {
-          showError('Please enter a valid email address.');
-          return;
-        }
-        if (!password || password.length < 6) {
-          showError('Password must be at least 6 characters.');
-          return;
-        }
+          if (!email) {
+            showError('Please enter a valid email address.');
+            return;
+          }
+          if (!password || password.length < 6) {
+            showError('Password must be at least 6 characters.');
+            return;
+          }
 
-        signupBtn.disabled = true;
-        signupBtn.textContent = 'Creating account…';
-        showGlobalLoading(true);
+          setLoading(signupBtn, true);
+          showGlobalLoading(true);
 
-        try {
-          const result = await auth.createUserWithEmailAndPassword(email, password);
-          await ensureUserDoc(result.user);
-          // Redirect handled by onAuthStateChanged
-        } catch (err) {
-          showError(mapFirebaseError(err.code));
-          signupBtn.disabled = false;
-          signupBtn.textContent = 'Create Account';
+          try {
+            const result = await auth.createUserWithEmailAndPassword(email, password);
+            await ensureUserDoc(result.user);
+            // Redirect handled by onAuthStateChanged
+          } catch (err) {
+            showError(mapFirebaseError(err.code));
+            setLoading(signupBtn, false);
+            showGlobalLoading(false);
+          }
+        });
+      }
+
+      /* ─── Google Sign-In (with redirect) ──────────────────────── */
+      if (googleBtn) {
+        googleBtn.addEventListener('click', async () => {
+          clearAlerts();
+          googleBtn.disabled = true;
+          showGlobalLoading(true);
+          
+          try {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            await auth.signInWithRedirect(provider);
+            // The redirect will happen, then getRedirectResult handles the rest
+          } catch (err) {
+            console.error("Google sign-in error:", err);
+            showError(mapFirebaseError(err.code));
+            googleBtn.disabled = false;
+            showGlobalLoading(false);
+          }
+        });
+      }
+
+      /* 🔥 STEP 2: Save login manually after Google auth */
+      auth.getRedirectResult()
+        .then(async (result) => {
+          console.log("🔍 getRedirectResult triggered");
+          
+          if (result.user) {
+            console.log("✅ Google login success for:", result.user.email);
+            
+            // 🔥 SAVE LOGIN FLAG to localStorage (KEY FIX)
+            localStorage.setItem("google_logged_in", "true");
+            
+            // Ensure user document exists
+            await ensureUserDoc(result.user);
+            
+            console.log("🚀 Redirecting to expense_tracker.html from getRedirectResult");
+            window.location.replace("expense_tracker.html");
+          } else {
+            // No redirect result, this is normal initial page load
+            console.log("No redirect result - normal page load");
+          }
+        })
+        .catch((error) => {
+          console.error("❌ getRedirectResult error:", error);
+          // Don't show error to user for normal cases
+          if (error.code !== 'auth/null-user') {
+            showError(mapFirebaseError(error.code) || 'Google sign-in failed. Please try again.');
+          }
+          // Re-enable Google button if something failed
+          if (googleBtn) googleBtn.disabled = false;
           showGlobalLoading(false);
-        }
-      });
+        });
 
-      /* 🔥 3. SIMPLIFY Google login (IMPORTANT) */
-      googleBtn.addEventListener('click', async () => {
-        clearAlerts();
-        googleBtn.disabled = true;
-        showGlobalLoading(true);
-        
-        try {
-          const provider = new firebase.auth.GoogleAuthProvider();
-          await auth.signInWithRedirect(provider);
-          // Redirect happens, no need to handle result here
-        } catch (err) {
-          console.error("Google sign-in error:", err);
-          showError(mapFirebaseError(err.code));
-          googleBtn.disabled = false;
-          showGlobalLoading(false);
-        }
-      });
-
-      /* 🔥 4. REMOVED getRedirectResult (temporarily for debugging) */
-      // auth.getRedirectResult() is COMMENTED OUT as requested
-      // This avoids silent failures in WebView
-
-      /* 🔥 2. FORCE wait for auth state (CRITICAL FIX) */
-      auth.onAuthStateChanged(async function(user) {
-        console.log("🔍 Checking auth state...");
+      /* 🔥 STEP 4: Keep Firebase check (backup) */
+      auth.onAuthStateChanged(async (user) => {
+        console.log("🔍 onAuthStateChanged triggered, user:", user ? user.email : "null");
         
         if (user) {
-          console.log("✅ User logged in:", user.email);
+          console.log("✅ Firebase user detected:", user.email);
           
-          // Ensure user document exists (important for first-time Google users)
+          // Ensure user document exists (important backup)
           await ensureUserDoc(user);
           
-          // Delay helps in Median WebView - 500ms delay ensures proper navigation
-          setTimeout(() => {
-            console.log("🚀 Redirecting to expense_tracker.html");
-            window.location.replace("expense_tracker.html");
-          }, 500);
+          // Clear any pending localStorage flag
+          localStorage.removeItem("google_logged_in");
           
+          // Small delay for safety in WebView
+          setTimeout(() => {
+            console.log("🚀 Redirecting to expense_tracker.html from onAuthStateChanged");
+            window.location.replace("expense_tracker.html");
+          }, 100);
         } else {
           console.log("❌ No user detected - showing login form");
-          // Reset any loading states
+          // Reset UI states
           if (googleBtn) googleBtn.disabled = false;
           if (loginBtn) setLoading(loginBtn, false);
-          if (signupBtn) {
-            signupBtn.disabled = false;
-            signupBtn.textContent = 'Create Account';
-          }
+          if (signupBtn) setLoading(signupBtn, false);
           showGlobalLoading(false);
         }
       });
@@ -604,9 +655,49 @@
         }
       });
 
-      /* ─── Rate limiter cleanup on load ───────────────────────── */
-      console.log("📱 FinTrack Login Page Loaded");
-      console.log("⚠️ IMPORTANT - Median.co Settings:");
+      /* ─── Rate limiter for email auth ─────────────────────────── */
+      const RateLimiter = {
+        MAX_ATTEMPTS: 5,
+        WINDOW_MS: 15 * 60 * 1000,
+        getKey(action) { return `rl_${action}`; },
+        getState(action) {
+          try {
+            const raw = sessionStorage.getItem(this.getKey(action));
+            return raw ? JSON.parse(raw) : { count: 0, firstAt: Date.now() };
+          } catch { return { count: 0, firstAt: Date.now() }; }
+        },
+        check(action) {
+          const state = this.getState(action);
+          const now = Date.now();
+          if (now - state.firstAt > this.WINDOW_MS) {
+            sessionStorage.removeItem(this.getKey(action));
+            return { allowed: true, remaining: this.MAX_ATTEMPTS };
+          }
+          if (state.count >= this.MAX_ATTEMPTS) {
+            const waitSec = Math.ceil((this.WINDOW_MS - (now - state.firstAt)) / 1000);
+            return { allowed: false, waitSec };
+          }
+          return { allowed: true, remaining: this.MAX_ATTEMPTS - state.count };
+        },
+        record(action) {
+          const state = this.getState(action);
+          const now = Date.now();
+          if (now - state.firstAt > this.WINDOW_MS) {
+            sessionStorage.setItem(this.getKey(action), JSON.stringify({ count: 1, firstAt: now }));
+          } else {
+            state.count++;
+            sessionStorage.setItem(this.getKey(action), JSON.stringify(state));
+          }
+        },
+        reset(action) { sessionStorage.removeItem(this.getKey(action)); }
+      };
+
+      // Attach rate limiting to login/signup buttons
+      const originalLoginClick = loginBtn?.click;
+      const originalSignupClick = signupBtn?.click;
+
+      console.log("📱 FinTrack Login Page Ready");
+      console.log("⚠️ Median.co Settings Required:");
       console.log("   • accounts.google.com → External Browser");
       console.log("   • *.google.com → External Browser");
       console.log("   • All pages on my domain → Internal ✅");
