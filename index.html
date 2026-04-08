@@ -489,20 +489,20 @@
 
   /* ─── Google Sign-In ──────────────────────────────────────── */
   googleBtn.addEventListener('click', async () => {
-    clearAlerts();
-    const rl = RateLimiter.check('google_auth');
-    if (!rl.allowed) {
-      rateWarning.textContent = `Too many attempts. Try again in ${Math.ceil(rl.waitSec / 60)} min.`;
-      rateWarning.style.display = 'block';
-      return;
-    }
+  clearAlerts();
 
-    googleBtn.disabled = true;
-    RateLimiter.record('google_auth');
+  const provider = new firebase.auth.GoogleAuthProvider();
+
+  try {
+    await auth.signInWithRedirect(provider);
+  } catch (err) {
+    showError(mapFirebaseError(err.code));
+  }
+});
 
     try {
       const provider = new firebase.auth.GoogleAuthProvider();
-      const result = await auth.signInWithPopup(provider);
+      await auth.signInWithRedirect(provider);
       await ensureUserDoc(result.user);
       RateLimiter.reset('google_auth');
       window.location.href = 'expense_tracker.html';
